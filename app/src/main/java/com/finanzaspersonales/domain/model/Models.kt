@@ -14,17 +14,19 @@ data class Goal(val id: String = newId(), val name: String, val target: Long, va
 data class Saving(val id: String = newId(), val goalId: String, val cents: Long, val date: LocalDate)
 enum class CreditType { CARD, DEBT }
 data class CreditAccount(val id: String = newId(), val name: String, val type: CreditType, val openingCents: Long = 0, val openedOn: LocalDate = LocalDate.now(), val archived: Boolean = false, val cutoffDay: Int? = null)
-data class DebtPayment(val id: String = newId(), val accountId: String, val cents: Long, val date: LocalDate, val planId: String? = null, val installment: Int? = null)
+data class DebtPayment(val id: String = newId(), val accountId: String, val cents: Long, val date: LocalDate, val planId: String? = null, val installment: Int? = null, val movementId: String? = null)
 data class Ledger(val categories: List<Category> = emptyList(), val movements: List<Movement> = emptyList(), val schedules: List<Schedule> = emptyList(), val goals: List<Goal> = emptyList(), val savings: List<Saving> = emptyList(), val accounts: List<CreditAccount> = emptyList(), val payments: List<DebtPayment> = emptyList(), val plans: List<InstallmentPlan> = emptyList()) {
  fun kind(m: Movement) = categories.first { it.id == m.categoryId }.kind
  fun total(kind: Kind, month: YearMonth) = reportingMovements(month).filter { kind(it) == kind }.sumOf { it.cents }
- fun balance(asOf: LocalDate = LocalDate.now()): Long = movements.filter { !it.date.isAfter(asOf) && it.accountId==null }.sumOf { if(kind(it)==Kind.INCOME) it.cents else -it.cents } - payments.filter { !it.date.isAfter(asOf) }.sumOf { it.cents }
+ fun balance(asOf: LocalDate = LocalDate.now()): Long = movements.filter { !it.date.isAfter(asOf) && it.accountId==null }.sumOf { if(kind(it)==Kind.INCOME) it.cents else -it.cents } - payments.filter { !it.date.isAfter(asOf) }.sumOf { it.cents } - savingsBalance(asOf)
  fun pending(id: String, asOf: LocalDate = LocalDate.now()): Long {
   val account=accounts.first { it.id==id }
   return (if(account.openedOn<=asOf) account.openingCents else 0) + plans.filter {it.accountId==id && it.historical && !it.includedInDebt && it.activeFrom<=asOf}.sumOf {it.initialRemaining} + movements.filter { it.accountId==id && it.date<=asOf }.sumOf { it.cents } - payments.filter { it.accountId==id && it.date<=asOf }.sumOf { it.cents }
  }
  fun totalDebt(asOf: LocalDate = LocalDate.now()) = accounts.sumOf { pending(it.id,asOf) }
  fun saved(goal: String) = savings.filter { it.goalId == goal }.sumOf { it.cents }
+ fun unpaidCharge(movementId: String) = movements.first { it.id==movementId }.cents - payments.filter { it.movementId==movementId }.sumOf { it.cents }
+ fun savingsBalance(asOf: LocalDate = LocalDate.now()) = savings.filter { !it.date.isAfter(asOf) }.sumOf { it.cents }
 }
 object Rules {
  const val MAX_CENTS = 999_999_999_99L
@@ -48,6 +50,8 @@ object Rules {
   require(l.movements.all { it.accountId==null || (it.accountId in accountIds && l.kind(it)==Kind.EXPENSE) }) { "Solo los gastos pueden asociarse a una tarjeta o deuda existente." }
   require(l.schedules.all { it.accountId==null || (it.accountId in accountIds && l.categories.firstOrNull { c->c.id==it.categoryId }?.kind==Kind.EXPENSE) }) { "Solo los gastos fijos pueden cargarse a una tarjeta o deuda." }
   require(l.payments.all { it.accountId in accountIds && it.cents in 1..MAX_CENTS }) { "Revisa el monto y destino del pago." }
+  require(l.payments.all {p->p.movementId==null || (p.planId==null && p.installment==null && l.movements.any {m->m.id==p.movementId && m.accountId==p.accountId && m.date<=p.date && l.kind(m)==Kind.EXPENSE && l.plans.none {it.movementId==m.id}}) }) { "El pago debe corresponder a un gasto de esa tarjeta y posterior a la compra." }
+  require(l.payments.mapNotNull {it.movementId}.distinct().all {id->l.unpaidCharge(id)>=0}) { "Los abonos asignados superan el importe de la compra." }
   MsiRules.validate(l)
   l.accounts.forEach { a ->
    val events=listOf(a.openedOn to a.openingCents) + l.plans.filter {it.accountId==a.id}.map {it.activeFrom to if(it.historical && !it.includedInDebt) it.initialRemaining else 0L} + l.movements.filter { it.accountId==a.id }.map { it.date to it.cents } + l.payments.filter { it.accountId==a.id }.map { it.date to -it.cents }
@@ -65,8 +69,8 @@ object Rules {
   require(l.movements.all { it.cents in 1..MAX_CENTS && it.categoryId in cats && it.note.length <= 500 })
   require(l.schedules.all { it.cents in 1..MAX_CENTS && it.categoryId in cats && it.anchorDay in 1..31 && it.title.isNotBlank() && it.title.length <= 80 && (if(it.paymentsTotal==null) it.paymentsRemaining==null else it.paymentsTotal in 1..600 && it.paymentsRemaining?.let {remaining->remaining in 1..it.paymentsTotal}==true && l.categories.first {c->c.id==it.categoryId}.kind==Kind.EXPENSE && (it.accountId==null || l.accounts.any {a->a.id==it.accountId && a.type==CreditType.CARD})) }) { "Revisa el número de cuotas y la forma de pago del préstamo." }
   require(l.goals.all { it.target in 1..MAX_CENTS && it.name.isNotBlank() && it.name.length <= 80 })
-  require(l.savings.all { it.goalId in goals && it.cents != 0L && it.cents in -MAX_CENTS..MAX_CENTS })
-  require(l.goals.all { l.saved(it.id) >= 0 }) { "Un ahorro no puede quedar en negativo." }
+  require(l.savings.all { (it.goalId.isEmpty() || it.goalId in goals) && it.cents != 0L && it.cents in -MAX_CENTS..MAX_CENTS })
+  require(l.savings.sumOf { it.cents } >= 0) { "El ahorro no puede quedar en negativo." }
   val occurrences=l.movements.mapNotNull { it.occurrence }; require(occurrences.distinct().size == occurrences.size)
  }
 }

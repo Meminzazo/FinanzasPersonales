@@ -7,7 +7,7 @@ Aplicación Android personal en español. Local-first, captura manual, moneda MX
 - Gastos e ingresos con fecha, categoría y nota; edición, eliminación confirmada y filtros por mes, tipo y categoría.
 - Categorías personalizadas, edición de nombre y archivado conservando el historial.
 - Gastos fijos y sueldos semanales, cada 15 días o mensuales; confirmar el importe y fecha reales registra el movimiento y avanza el vencimiento sin duplicarlo.
-- Metas de ahorro con objetivo, fecha opcional, aportaciones, retiros y progreso. El ahorro no se contabiliza como gasto/ingreso.
+- Ahorro como fondo único: guarda y retira dinero sin metas. Las transferencias no cuentan como gasto ni ingreso.
 - Inicio con resumen mensual, pendientes y últimos movimientos; desglose por categoría y comparación con el mes anterior.
 - Respaldos manuales cifrados y restauración completa validada y transaccional. Se guarda una copia previa exportable antes de reemplazar los datos.
 - Tema claro/oscuro según el sistema.
@@ -81,7 +81,7 @@ El APK entregado está en la raíz como `Finanzas Personales v1.0.apk`.
 
 ## Saldo actual
 
-Inicio muestra el dinero registrado disponible hasta hoy: ingresos menos gastos de contado y pagos a tarjetas/deudas, incluyendo meses anteriores. Las compras a crédito se reflejan como gasto y deuda pendiente; no reducen este dinero hasta registrar el abono. No cambia al navegar entre meses. Los movimientos futuros y programados sin confirmar no lo alteran. Las aportaciones/retiros de ahorro no lo modifican: el saldo incluye el dinero apartado en metas. El cálculo parte de cero y de los registros de la app, sin consultar saldos bancarios.
+Inicio muestra el dinero registrado disponible hasta hoy: ingresos menos gastos de contado y pagos a tarjetas/deudas, incluyendo meses anteriores. Las compras a crédito se reflejan como gasto y deuda pendiente; no reducen este dinero hasta registrar el abono. No cambia al navegar entre meses. Los movimientos futuros y programados sin confirmar no lo alteran. Guardar dinero en Ahorros reduce este saldo y retirarlo lo aumenta; el ahorro se muestra aparte. El cálculo parte de cero y de los registros de la app, sin consultar saldos bancarios.
 
 Validación del saldo actual: cinco pruebas locales correctas, compilación y Lint sin errores; comprobado en emulador el resultado $1,000 - $250 = $750, su independencia del mes seleccionado y conservación de datos al actualizar el APK.
 
@@ -114,3 +114,17 @@ En Programados → Agregar préstamo con cuotas registra nombre, importe por cuo
 En Más → Actualizaciones → Buscar actualización la app consulta manualmente el último Release público de `Meminzazo/FinanzasPersonales`. Si el tag tiene una versión mayor (por ejemplo, `v1.2`), muestra sus notas y permite descargar e instalar el APK incluido. La descarga se comprueba por tamaño, paquete, código de versión y firma; si GitHub publica una huella SHA-256 del asset, también se verifica. Android pide permiso para instalar desde esta app y confirmación final. No hay consulta ni descarga automática. Una respuesta 404 antes del primer Release se muestra como ausencia de actualización.
 
 Para publicar la primera versión, crea un Release estable con tag `v1.1` y un único APK de esta app como asset. En cada versión posterior, incrementa `versionCode` y `versionName` en `app/build.gradle.kts`, usa el tag correspondiente (`v1.2`, etc.) y firma el APK con **la misma clave que la versión ya instalada**. El APK debug entregado se firma con la clave debug local de esta computadora: un APK firmado con otra clave no podrá instalarse encima sin desinstalar, lo que pondría en riesgo los datos locales. Guarda la clave de firma fuera del repositorio.
+
+
+## Inicio: resumen mensual y saldo
+
+La primera tarjeta de Inicio muestra ingresos, gastos y diferencia del mes seleccionado. Debajo aparece el saldo actual calculado con todos los movimientos registrados hasta hoy; por ello puede ser distinto de la diferencia mensual. El ahorro acumulado y el importe por pagar se conservan como indicadores separados.
+
+
+## Ahorro como fondo y pagos de compras con tarjeta (v1.2)
+
+Inicio muestra primero ingresos, gastos y diferencia del mes seleccionado; debajo, el saldo actual calculado hasta hoy. Ahorros es una sola bolsa de dinero, sin metas: guardar reduce el saldo disponible y retirar lo aumenta, sin crear ingresos ni gastos. Los importes de metas antiguas se muestran juntos en la bolsa y se conservan en los respaldos.
+
+En un gasto ordinario cargado a tarjeta, **Registrar pago de esta compra** permite abonos parciales o liquidarlo. Se muestran los abonos asignados y el importe pendiente de esa compra. El pago reduce el saldo actual y la deuda de la tarjeta, sin duplicar el gasto mensual. Los pagos generales anteriores quedan sin asignar; puedes editarlos desde Tarjetas para asociarlos a una compra. Los pagos MSI siguen su propio plan.
+
+La base Room usa esquema 7 y migra desde los esquemas anteriores. El respaldo nuevo usa formato 7 y sigue importando los formatos 1 a 6. Para publicar esta versión en GitHub, usa tag `v1.2`, APK con `versionCode` 3 y la misma clave de firma que la app ya instalada.

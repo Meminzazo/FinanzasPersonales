@@ -18,7 +18,7 @@ class LocalFinanceRepository @Inject constructor(private val db: FinanceDatabase
   dao.goals().map { Goal(it.id,it.name,it.target,it.deadline?.let(LocalDate::parse)) },
   dao.savings().map { Saving(it.id,it.goalId,it.cents,LocalDate.parse(it.date)) },
   dao.accounts().map { CreditAccount(it.id,it.name,CreditType.valueOf(it.type),it.openingCents,LocalDate.parse(it.openedOn),it.archived,it.cutoffDay) },
-  dao.payments().map { DebtPayment(it.id,it.accountId,it.cents,LocalDate.parse(it.date),it.planId,it.installment) },
+  dao.payments().map { DebtPayment(it.id,it.accountId,it.cents,LocalDate.parse(it.date),it.planId,it.installment,it.movementId) },
   dao.plans().map { InstallmentPlan(it.id,it.title,it.accountId,it.totalCents,it.months,it.paidBefore,LocalDate.parse(it.firstDue),LocalDate.parse(it.purchaseDate),it.categoryId,it.historical,it.includedInDebt,LocalDate.parse(it.registeredOn),it.amounts?.split(",")?.map(String::toLong) ?: emptyList()) })
  override suspend fun snapshot() = db.withTransaction { read() }
  override suspend fun seed() { db.withTransaction { if(dao.categories().isEmpty()) {
@@ -56,7 +56,7 @@ class LocalFinanceRepository @Inject constructor(private val db: FinanceDatabase
     Rules.validate(next)
     dao.plan(PlanRow(updated.id,updated.title,updated.accountId,updated.totalCents,updated.months,updated.paidBefore,updated.firstDue.toString(),updated.purchaseDate.toString(),updated.categoryId,updated.historical,updated.includedInDebt,updated.registeredOn.toString(),updated.amounts.joinToString(",")))
    } else Rules.validate(next)
-   dao.payment(PaymentRow(p.id,p.accountId,p.cents,p.date.toString(),p.planId,p.installment))
+   dao.payment(PaymentRow(p.id,p.accountId,p.cents,p.date.toString(),p.planId,p.installment,p.movementId))
   }
  }
  override suspend fun deletePayment(id: String) = change({it.copy(payments=it.payments.filterNot {p->p.id==id})}) { dao.deletePayment(id) }
@@ -76,7 +76,7 @@ class LocalFinanceRepository @Inject constructor(private val db: FinanceDatabase
    dao.deleteMovement(p.movementId)
    dao.plan(PlanRow(p.id,p.title,p.accountId,p.totalCents,p.months,p.paidBefore,p.firstDue.toString(),p.purchaseDate.toString(),p.categoryId,p.historical,p.includedInDebt,p.registeredOn.toString(),p.amounts.takeIf {it.isNotEmpty()}?.joinToString(",")))
    if(!p.historical) {val m=p.purchase();dao.movement(MovementRow(m.id,m.cents,m.categoryId,m.date.toString(),m.note,m.occurrence,m.accountId))}
-   next.payments.filter {it.planId==p.id}.forEach {dao.payment(PaymentRow(it.id,it.accountId,it.cents,it.date.toString(),it.planId,it.installment))}
+   next.payments.filter {it.planId==p.id}.forEach {dao.payment(PaymentRow(it.id,it.accountId,it.cents,it.date.toString(),it.planId,it.installment,it.movementId))}
   }
  }
  override suspend fun deletePlan(id:String) {
@@ -100,7 +100,7 @@ class LocalFinanceRepository @Inject constructor(private val db: FinanceDatabase
    dao.clearPayments();dao.clearPlans();dao.clearAccounts();dao.clearSavings();dao.clearMovements();dao.clearSchedules();dao.clearGoals();dao.clearCategories()
    l.plans.forEach {p->dao.plan(PlanRow(p.id,p.title,p.accountId,p.totalCents,p.months,p.paidBefore,p.firstDue.toString(),p.purchaseDate.toString(),p.categoryId,p.historical,p.includedInDebt,p.registeredOn.toString(),p.amounts.takeIf {it.isNotEmpty()}?.joinToString(",")))}
    l.accounts.forEach { dao.account(AccountRow(it.id,it.name,it.type.name,it.openingCents,it.openedOn.toString(),it.archived,it.cutoffDay)) }
-   l.payments.forEach { dao.payment(PaymentRow(it.id,it.accountId,it.cents,it.date.toString(),it.planId,it.installment)) }
+   l.payments.forEach { dao.payment(PaymentRow(it.id,it.accountId,it.cents,it.date.toString(),it.planId,it.installment,it.movementId)) }
    l.categories.forEach { dao.category(CategoryRow(it.id,it.name,it.kind.name,it.archived)) }
    l.movements.forEach { dao.movement(MovementRow(it.id,it.cents,it.categoryId,it.date.toString(),it.note,it.occurrence,it.accountId)) }
    l.schedules.forEach { dao.schedule(ScheduleRow(it.id,it.title,it.cents,it.categoryId,it.due.toString(),it.frequency.name,it.anchorDay,it.accountId,it.paymentsTotal,it.paymentsRemaining)) }

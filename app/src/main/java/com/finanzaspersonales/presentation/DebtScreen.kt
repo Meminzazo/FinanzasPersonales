@@ -41,7 +41,7 @@ internal fun LazyListScope.debtSection(l:Ledger,busy:Boolean,type:CreditType,onA
     Text("Pagos registrados",fontWeight=FontWeight.SemiBold)
     (if(allPayments) payments else payments.take(5)).forEach {p ->
      Row(verticalAlignment=Alignment.CenterVertically) {
-      Column(Modifier.weight(1f)) {Text(money(p.cents),fontWeight=FontWeight.Medium);Text(p.date.toString(),style=MaterialTheme.typography.bodySmall);if(p.planId!=null) Text("MSI · mensualidad ${p.installment}",style=MaterialTheme.typography.bodySmall)}
+      Column(Modifier.weight(1f)) {Text(money(p.cents),fontWeight=FontWeight.Medium);Text(p.date.toString(),style=MaterialTheme.typography.bodySmall);if(p.planId!=null) Text("MSI · mensualidad ${p.installment}",style=MaterialTheme.typography.bodySmall);if(p.movementId!=null) Text("Compra: ${l.movements.firstOrNull {it.id==p.movementId}?.note?.ifBlank { "Gasto con tarjeta" } ?: "Gasto con tarjeta"}",style=MaterialTheme.typography.bodySmall);if(p.planId==null && p.movementId==null && cards) Text("Pago general sin asignar",style=MaterialTheme.typography.bodySmall)}
       IconButton(onClick={onEditPayment(p)},enabled=!busy) {Icon(Icons.Default.Edit,"Editar pago")}
       IconButton(onClick={onDeletePayment(p)},enabled=!busy && (p.planId==null || p.installment==l.plans.first {it.id==p.planId}.paidBefore+l.payments.count {it.planId==p.planId})) {Icon(Icons.Default.DeleteOutline,"Eliminar pago")}
      }
@@ -74,5 +74,26 @@ internal fun LazyListScope.debtSection(l:Ledger,busy:Boolean,type:CreditType,onA
    Text("Una compra hecha después del corte aparece en gastos del mes siguiente. La fecha de compra y la deuda no cambian. En MSI se usa la fecha de cada mensualidad.",style=MaterialTheme.typography.bodySmall)
   }
   if(a!=null) Text("Los cambios recalculan la deuda conservando compras y pagos. Debe seguir cubriendo los pagos y MSI registrados.",style=MaterialTheme.typography.bodySmall)
+ }
+}
+
+
+@Composable internal fun CardPaymentForm(l:Ledger,a:CreditAccount,existing:DebtPayment?,initial:Movement?,dismiss:()->Unit,save:(DebtPayment)->Unit) {
+ val charges=l.movements.filter {it.accountId==a.id && l.plans.none {p->p.movementId==it.id}}.sortedByDescending {it.date}
+ var selected by remember(existing?.id,initial?.id) {mutableStateOf(existing?.movementId ?: initial?.id ?: "")}
+ val own=existing?.cents ?: 0L
+ val available=(l.freeDebt(a.id)+own).coerceAtLeast(0L)
+ val chosen=charges.firstOrNull {it.id==selected}
+ val limit=minOf(available,chosen?.let {l.unpaidCharge(it.id)+if(existing?.movementId==it.id) own else 0L} ?: available)
+ var amount by remember(existing?.id,initial?.id) {mutableStateOf(existing?.cents?.let(::decimal) ?: if(initial!=null && limit>0) decimal(limit) else "")}
+ var day by remember(existing?.id) {mutableStateOf((existing?.date ?: LocalDate.now()).toString())}
+ val valid=runCatching {val cents=Rules.cents(amount);val date=LocalDate.parse(day);require(cents<=limit && (chosen==null || (date>=chosen.date && date<=LocalDate.now())))}.isSuccess
+ FormDialog(if(initial!=null) "Pagar esta compra" else if(existing!=null) "Editar pago de tarjeta" else "Registrar pago de tarjeta",dismiss,valid,onSave={val cents=Rules.cents(amount);val date=LocalDate.parse(day);save(existing?.copy(cents=cents,date=date,movementId=selected.takeIf {it.isNotEmpty()}) ?: DebtPayment(accountId=a.id,cents=cents,date=date,movementId=selected.takeIf {it.isNotEmpty()}))}) {
+  Text("Reduce la deuda de ${a.name} y tu saldo actual. No cuenta otra vez como gasto.",style=MaterialTheme.typography.bodySmall)
+  Select("Compra que pagas",listOf("" to "Pago general, sin asignar")+charges.map {it.id to "${it.date} · ${it.note.ifBlank {l.categories.first {c->c.id==it.categoryId}.name}} · ${money(it.cents)}"},selected) {selected=it}
+  if(chosen!=null) Text("Por asignar a esta compra: ${money(limit)}",style=MaterialTheme.typography.bodySmall) else Text("Deuda disponible sin MSI: ${money(limit)}",style=MaterialTheme.typography.bodySmall)
+  Field(amount,"Importe del pago (MXN)",{amount=it},true)
+  DateField(day,"Fecha del pago",{day=it})
+  if(chosen!=null && l.payments.any {it.accountId==a.id && it.planId==null && it.movementId==null && it.id!=existing?.id}) Text("Los pagos generales anteriores no se asignan automáticamente. Puedes editarlos aquí para asociarlos a una compra.",style=MaterialTheme.typography.bodySmall)
  }
 }

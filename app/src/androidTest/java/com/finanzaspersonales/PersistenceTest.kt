@@ -54,6 +54,21 @@ import java.time.LocalDate
   assertEquals(2,done.movements.size)
   assertTrue(runCatching {repo.confirm(loan.id,second.due,3000,second.due)}.isFailure)
  }
+ @Test fun linkedCardPaymentsSurviveEditsAndEncryptedBackup()=runBlocking {
+  repo.seed();val day=LocalDate.now();val category=repo.snapshot().categories.first {it.kind==Kind.EXPENSE}
+  val card=CreditAccount(name="Tarjeta",type=CreditType.CARD,openedOn=day);repo.account(card)
+  val charge=Movement(cents=10000,categoryId=category.id,date=day,accountId=card.id);repo.movement(charge)
+  val payment=DebtPayment(accountId=card.id,cents=4000,date=day,movementId=charge.id);repo.payment(payment)
+  repo.payment(payment.copy(cents=5000))
+  val original=repo.snapshot();assertEquals(5000L,original.unpaidCharge(charge.id));assertEquals(5000L,original.pending(card.id))
+  assertTrue(runCatching {repo.deleteMovement(charge.id)}.isFailure)
+  val bytes=BackupCodec.encrypt(BackupCodec.encode(original),"password123".toCharArray())
+  repo.restore(BackupCodec.decode(BackupCodec.decrypt(bytes,"password123".toCharArray())))
+  assertEquals(original,repo.snapshot())
+  val old=org.json.JSONObject(BackupCodec.encode(original).toString(Charsets.UTF_8)).put("version",6)
+  old.getJSONArray("payments").getJSONObject(0).remove("movement")
+  assertNull(BackupCodec.decode(old.toString().toByteArray(Charsets.UTF_8)).payments.single().movementId)
+ }
  @Test fun creditPaymentsSurviveBackupAndRejectDeletingPaidPurchases()=runBlocking {
   repo.seed();val d=LocalDate.now();val c=repo.snapshot().categories.first {it.kind==Kind.EXPENSE}
   val a=CreditAccount(name="BBVA",type=CreditType.CARD,openedOn=d);repo.account(a)
@@ -110,6 +125,15 @@ import java.time.LocalDate
   val edited=repo.snapshot();assertEquals(3500L,edited.payments.single().cents);assertEquals(3500L,edited.plans.single().amount(1));assertEquals(8500L,edited.pending(other.id))
   assertEquals(edited,BackupCodec.decode(BackupCodec.encode(edited)))
   assertTrue(runCatching {repo.updatePlan(revised.copy(totalCents=100))}.isFailure);assertEquals(edited,repo.snapshot())
+ }
+ @Test fun generalSavingsAndOlderGoalsRoundTripWithoutLoss()=runBlocking {
+  repo.seed();val d=LocalDate.now()
+  val legacy=Goal(name="Meta anterior",target=10000);repo.goal(legacy)
+  repo.saving(Saving(goalId=legacy.id,cents=1000,date=d))
+  repo.saving(Saving(goalId="",cents=2500,date=d))
+  val before=repo.snapshot();assertEquals(3500L,before.savingsBalance(d));assertEquals(-3500L,before.balance(d))
+  repo.restore(BackupCodec.decode(BackupCodec.encode(before)))
+  assertEquals(before,repo.snapshot())
  }
  @Test fun editingSavingsUpdatesInsteadOfDuplicatingEntry()=runBlocking {
   val g=Goal(name="Meta",target=10000);repo.goal(g)

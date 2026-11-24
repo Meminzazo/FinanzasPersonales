@@ -35,6 +35,24 @@ class RulesTest {
   assertEquals(3000L,debt.total(Kind.EXPENSE,YearMonth.of(2026,10)))
   assertTrue(runCatching {Rules.validate(l.copy(accounts=listOf(card.copy(cutoffDay=32))))}.isFailure)
  }
+ @Test fun partialCardPaymentsStayLinkedWithoutDuplicatingExpense() {
+  val day=LocalDate.parse("2026-11-01")
+  val category=Category("e","Compras",Kind.EXPENSE)
+  val card=CreditAccount("a","Tarjeta",CreditType.CARD,openedOn=day)
+  val charge=Movement("m",10000,"e",day,accountId="a")
+  val first=DebtPayment("p1","a",4000,day,movementId="m")
+  val second=DebtPayment("p2","a",3000,day,movementId="m")
+  val ledger=Ledger(categories=listOf(category),accounts=listOf(card),movements=listOf(charge),payments=listOf(first,second))
+  Rules.validate(ledger)
+  assertEquals(3000L,ledger.unpaidCharge("m"));assertEquals(3000L,ledger.pending("a",day))
+  assertEquals(-7000L,ledger.balance(day));assertEquals(10000L,ledger.total(Kind.EXPENSE,YearMonth.from(day)))
+  assertTrue(runCatching {Rules.validate(ledger.copy(payments=ledger.payments+DebtPayment(accountId="a",cents=3001,date=day,movementId="m")))}.isFailure)
+  assertTrue(runCatching {Rules.validate(ledger.copy(movements=listOf(charge.copy(cents=6999))))}.isFailure)
+  assertTrue(runCatching {Rules.validate(ledger.copy(movements=emptyList()))}.isFailure)
+  assertTrue(runCatching {Rules.validate(ledger.copy(payments=listOf(first.copy(date=day.minusDays(1)),second)))}.isFailure)
+  val general=ledger.copy(payments=listOf(first.copy(movementId=null),second))
+  Rules.validate(general);assertEquals(7000L,general.unpaidCharge("m"));assertEquals(3000L,general.pending("a",day))
+ }
  @Test fun creditPurchaseAndPaymentDoNotDoubleCountExpenses() {
   val d=LocalDate.parse("2026-10-29")
   val categories=listOf(Category("i","Sueldo",Kind.INCOME),Category("e","Compras",Kind.EXPENSE))
@@ -70,9 +88,9 @@ class RulesTest {
    Movement(cents=30000,categoryId="e",date=today.plusDays(1))),
    schedules=listOf(Schedule(title="Pendiente",cents=40000,categoryId="e",due=today,frequency=Frequency.MONTHLY)),
    goals=listOf(goal),savings=listOf(Saving(goalId="g",cents=10000,date=today)))
-  assertEquals(75000L,l.balance(today))
-  assertEquals(45000L,l.balance(today.plusDays(1)))
-  assertEquals(-25000L,l.copy(movements=l.movements.filter {it.categoryId=="e"}).balance(today))
+  assertEquals(65000L,l.balance(today))
+  assertEquals(35000L,l.balance(today.plusDays(1)))
+  assertEquals(-35000L,l.copy(movements=l.movements.filter {it.categoryId=="e"}).balance(today))
   assertEquals(0L,Ledger().balance(today))
  }
 
@@ -84,6 +102,21 @@ class RulesTest {
   val s=Schedule(title="Renta",cents=100,categoryId="c",due=LocalDate.parse("2025-01-31"),frequency=Frequency.MONTHLY)
   val feb=Rules.next(s);assertEquals(LocalDate.parse("2025-02-28"),feb)
   assertEquals(LocalDate.parse("2025-03-31"),Rules.next(s.copy(due=feb)))
+ }
+ @Test fun savingTransfersMoveMoneyWithoutBecomingIncomeOrExpense() {
+  val d=LocalDate.parse("2026-11-01")
+  val income=Category("i","Sueldo",Kind.INCOME)
+  val legacy=Goal("old","Meta anterior",10000)
+  val l=Ledger(categories=listOf(income),movements=listOf(Movement(cents=10000,categoryId="i",date=d)),goals=listOf(legacy),savings=listOf(
+   Saving(goalId="old",cents=1000,date=d),Saving(goalId="",cents=2000,date=d)))
+  Rules.validate(l)
+  assertEquals(3000L,l.savingsBalance(d));assertEquals(7000L,l.balance(d))
+  val withdrawn=l.copy(savings=l.savings+Saving(goalId="",cents=-500,date=d))
+  Rules.validate(withdrawn)
+  assertEquals(2500L,withdrawn.savingsBalance(d));assertEquals(7500L,withdrawn.balance(d))
+  assertEquals(0L,withdrawn.total(Kind.EXPENSE,YearMonth.from(d)))
+  assertEquals(10000L,withdrawn.total(Kind.INCOME,YearMonth.from(d)))
+  assertTrue(runCatching {Rules.validate(withdrawn.copy(savings=withdrawn.savings+Saving(goalId="",cents=-2501,date=d)))}.isFailure)
  }
  @Test fun savingsDoNotBecomeExpensesOrIncome() {
   val c=Category("c","Comida",Kind.EXPENSE);val g=Goal("g","Meta",10000)

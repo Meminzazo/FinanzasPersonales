@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,7 +19,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,6 +55,7 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
   var selectedSaving by remember {mutableStateOf<Saving?>(null)}
   var creditAccount by remember { mutableStateOf<CreditAccount?>(null) }
   var debtPayment by remember { mutableStateOf<DebtPayment?>(null) }
+  var payingMovement by remember {mutableStateOf<Movement?>(null)}
   var msiPlan by remember {mutableStateOf<InstallmentPlan?>(null)}
   var msiNumber by remember {mutableIntStateOf(1)}
   var deleteMsi by remember {mutableStateOf<InstallmentPlan?>(null)}
@@ -65,9 +64,10 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
   var monthString by rememberSaveable { mutableStateOf(YearMonth.now().toString()) };val month=YearMonth.parse(monthString)
   var dialog by remember { mutableStateOf<String?>(null) }
   var initialKind by remember { mutableStateOf(Kind.EXPENSE) }
-  var movement by remember { mutableStateOf<Movement?>(null) };var schedule by remember { mutableStateOf<Schedule?>(null) };var newLoan by remember {mutableStateOf(false)};var goal by remember { mutableStateOf<Goal?>(null) };var category by remember { mutableStateOf<Category?>(null) }
+  var movement by remember { mutableStateOf<Movement?>(null) };var schedule by remember { mutableStateOf<Schedule?>(null) };var newLoan by remember {mutableStateOf(false)};var category by remember { mutableStateOf<Category?>(null) }
   var deleteMovement by remember { mutableStateOf<Movement?>(null) };var deleteSchedule by remember { mutableStateOf<Schedule?>(null) }
   val editEntry:(Movement)->Unit={m->val p=l.plans.firstOrNull {m.occurrence=="MSI:${it.id}" || m.id==it.movementId};if(p!=null) {msiPlan=p;dialog="msiEdit"} else {movement=l.movements.firstOrNull {it.id==m.id} ?: m;dialog="movement"}}
+  val payEntry:(Movement)->Unit={m->val actual=l.movements.first {it.id==m.id};creditAccount=l.accounts.first {it.id==actual.accountId};debtPayment=null;payingMovement=actual;dialog="chargePayment"}
   val deleteEntry:(Movement)->Unit={m->val p=l.plans.firstOrNull {m.occurrence=="MSI:${it.id}" || m.id==it.movementId};if(p!=null) deleteMsi=p else deleteMovement=m}
   val snackbar=remember { SnackbarHostState() }
   LaunchedEffect(vm) { vm.message.collect { snackbar.showSnackbar(it) } }
@@ -93,28 +93,40 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
      0 -> LazyColumn(contentPadding=PaddingValues(20.dp,6.dp,20.dp,100.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
       item { MonthPicker(month,{monthString=month.minusMonths(1).toString()},{monthString=month.plusMonths(1).toString()}) }
       item {
-       Surface(color=MaterialTheme.colorScheme.secondaryContainer,shape=RoundedCornerShape(20.dp)) {
-        Column(Modifier.fillMaxWidth().padding(22.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-         Row(verticalAlignment=Alignment.CenterVertically) { Text("Saldo actual",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium);Icon(Icons.Default.AccountBalanceWallet,null) }
-         Text(money(l.balance()),fontSize=32.sp,fontWeight=FontWeight.Bold,color=if(l.balance()<0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSecondaryContainer)
-         Text("Ingresos − gastos de contado − pagos de deuda",style=MaterialTheme.typography.bodySmall)
-         TextButton(onClick={moreSection="Tarjetas";tab=4},contentPadding=PaddingValues(0.dp)) {Text("Por pagar: ${money(l.totalDebt())}");Icon(Icons.Default.ChevronRight,null)}
+       Surface(color=MaterialTheme.colorScheme.primary,shape=RoundedCornerShape(24.dp)) {
+        Column(Modifier.fillMaxWidth().padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+         Text("Este mes",style=MaterialTheme.typography.titleMedium)
+         Row(verticalAlignment=Alignment.CenterVertically) {
+          Text("Ingresos",Modifier.weight(1f));Text(money(l.total(Kind.INCOME,month)),fontSize=22.sp,fontWeight=FontWeight.SemiBold)
+         }
+         Row(verticalAlignment=Alignment.CenterVertically) {
+          Text("Gastos",Modifier.weight(1f));Text(money(l.total(Kind.EXPENSE,month)),fontSize=22.sp,fontWeight=FontWeight.SemiBold)
+         }
+         HorizontalDivider(color=MaterialTheme.colorScheme.onPrimary.copy(alpha=.25f))
+         Row(verticalAlignment=Alignment.CenterVertically) {
+          Text("Diferencia del mes",Modifier.weight(1f),fontWeight=FontWeight.Medium)
+          Text(money(l.total(Kind.INCOME,month)-l.total(Kind.EXPENSE,month)),fontSize=24.sp,fontWeight=FontWeight.Bold)
+         }
+         Text("Los gastos con tarjeta siguen su corte; las MSI, el mes de la mensualidad.",style=MaterialTheme.typography.bodySmall)
         }
        }
       }
       item {
-       Surface(color=MaterialTheme.colorScheme.primary,shape=RoundedCornerShape(24.dp)) {
-        Column(Modifier.fillMaxWidth().padding(24.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-         Text("Gastos del mes",style=MaterialTheme.typography.titleMedium)
-         Text(money(l.total(Kind.EXPENSE,month)),fontSize=36.sp,fontWeight=FontWeight.SemiBold)
-         HorizontalDivider(color=MaterialTheme.colorScheme.onPrimary.copy(alpha=.25f))
-         Text("Hoy: ${money(l.expensesOn(LocalDate.now()))}");Text("Tarjetas: compras después del corte pasan al siguiente mes. MSI: mensualidad del vencimiento",style=MaterialTheme.typography.bodySmall)
+       Surface(color=MaterialTheme.colorScheme.secondaryContainer,shape=RoundedCornerShape(20.dp)) {
+        Column(Modifier.fillMaxWidth().padding(22.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+         Row(verticalAlignment=Alignment.CenterVertically) { Text("Saldo actual",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium);Icon(Icons.Default.AccountBalanceWallet,null) }
+         Text(money(l.balance()),fontSize=32.sp,fontWeight=FontWeight.Bold,color=if(l.balance()<0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSecondaryContainer)
+         Text("Calculado con tus movimientos hasta hoy; los pagos a tarjetas se restan cuando los registras.",style=MaterialTheme.typography.bodySmall)
+         TextButton(onClick={moreSection="Tarjetas";tab=4},contentPadding=PaddingValues(0.dp)) {Text("Por pagar: ${money(l.totalDebt())}");Icon(Icons.Default.ChevronRight,null)}
         }
        }
       }
-      item { Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-       Stat("Ingresos del mes",money(l.total(Kind.INCOME,month)),Icons.AutoMirrored.Filled.TrendingUp,Modifier.weight(1f))
-       Stat("Ahorro acumulado",money(l.savings.sumOf { it.cents }),Icons.Default.Savings,Modifier.weight(1f))
+      item { Surface(shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surface) {
+       Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically) {
+        Icon(Icons.Default.Savings,null,tint=MaterialTheme.colorScheme.primary)
+        Text("Ahorro acumulado",Modifier.weight(1f).padding(start=12.dp))
+        Text(money(l.savingsBalance()),fontWeight=FontWeight.Bold)
+       }
       } }
       item { TextButton(onClick={initialKind=Kind.INCOME;movement=null;dialog="movement"}) { Icon(Icons.Default.Add,null);Text("Registrar ingreso") } }
       item { Text("Pendientes por confirmar",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold) }
@@ -123,7 +135,7 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
       items(l.plans.filter {l.nextInstallment(it)!=null}.take(2),key={"plan-home-${it.id}"}) {p->InstallmentCard(p,l,busy,{plan,n->msiPlan=plan;msiNumber=n;dialog="msiPay"},{deleteMsi=it},{msiPlan=it;dialog="msiEdit"})}
       item { Text("Últimos movimientos",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold) }
       if(l.reportingMovements(month).isEmpty()) item { Empty("Aún no hay movimientos. Registra tu primer gasto.") }
-      items(l.reportingMovements(month).take(5),key={it.id}) { m -> MovementCard(m,l,{editEntry(m)},{deleteEntry(m)}) }
+      items(l.reportingMovements(month).take(5),key={it.id}) { m -> MovementCard(m,l,{editEntry(m)},{deleteEntry(m)},{payEntry(m)}) }
      }
      1 -> {
       var selectedKind by rememberSaveable { mutableStateOf("Todos") };var selectedCategory by rememberSaveable { mutableStateOf("") }
@@ -135,7 +147,7 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
        item { Select("Forma de pago / deuda",listOf("" to "Todas", "cash" to "Contado: efectivo o débito")+l.accounts.map {it.id to it.name},accountFilter) {accountFilter=it} }
        val filtered=l.reportingMovements(month).filter { (selectedKind=="Todos" || l.kind(it)==if(selectedKind=="Gastos") Kind.EXPENSE else Kind.INCOME) && (selectedCategory.isEmpty() || it.categoryId==selectedCategory) && (accountFilter.isEmpty() || if(accountFilter=="cash") it.accountId==null else it.accountId==accountFilter) }.sortedByDescending {it.date}
        if(filtered.isEmpty()) item { Empty("No hay movimientos con estos filtros.") }
-       items(filtered,key={it.id}) {m -> MovementCard(m,l,{editEntry(m)},{deleteEntry(m)})}
+       items(filtered,key={it.id}) {m -> MovementCard(m,l,{editEntry(m)},{deleteEntry(m)},{payEntry(m)})}
       }
      }
      2 -> LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -148,20 +160,25 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
       items(l.plans.filter {l.nextInstallment(it)!=null}.sortedBy {it.due(l.nextInstallment(it)!!)},key={"plan-program-${it.id}"}) {p->InstallmentCard(p,l,busy,{plan,n->msiPlan=plan;msiNumber=n;dialog="msiPay"},{deleteMsi=it},{msiPlan=it;dialog="msiEdit"})}
      }
      3 -> LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-      item {Heading("Tus ahorros","Cada aportación te acerca a tu meta.")}
-      item {Button(onClick={goal=null;dialog="goal"},modifier=Modifier.fillMaxWidth()) {Icon(Icons.Default.Add,null);Text("Crear meta")} }
-      if(l.goals.isEmpty()) item {Empty("Define para qué quieres ahorrar y cuánto necesitas.")}
-      items(l.goals,key={it.id}) { g ->
-       Card {Column(Modifier.fillMaxWidth().padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment=Alignment.CenterVertically) {Text(g.name,Modifier.weight(1f),style=MaterialTheme.typography.titleLarge);IconButton(onClick={goal=g;dialog="goal"}) {Icon(Icons.Default.Edit,"Editar meta")}}
-        Text("${money(l.saved(g.id))} de ${money(g.target)}",fontWeight=FontWeight.Bold)
-        LinearProgressIndicator(progress={(l.saved(g.id).toFloat()/g.target).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth())
-        Text("Faltan ${money((g.target-l.saved(g.id)).coerceAtLeast(0))}${g.deadline?.let { " · Meta: $it" } ?: ""}",style=MaterialTheme.typography.bodySmall)
-        Row {TextButton(onClick={goal=g;dialog="deposit"}) {Text("Aportar")};TextButton(onClick={goal=g;dialog="withdraw"}) {Text("Retirar")}}
-        var showAll by rememberSaveable(g.id) {mutableStateOf(false)}
-        val entries=l.savings.filter {it.goalId==g.id}.sortedByDescending {it.date}
-        (if(showAll) entries else entries.take(5)).forEach {s->Row(verticalAlignment=Alignment.CenterVertically) {Text("${s.date}  ${if(s.cents>0) "+" else ""}${money(s.cents)}",Modifier.weight(1f),style=MaterialTheme.typography.bodySmall);IconButton(onClick={selectedSaving=s;dialog="editSaving"}) {Icon(Icons.Default.Edit,"Editar movimiento de ahorro")}}}
-        if(entries.size>5) TextButton(onClick={showAll=!showAll}) {Text(if(showAll) "Ver menos" else "Ver todos los movimientos de ahorro")}
+      item { Heading("Ahorros","Dinero que apartas y puedes retirar cuando quieras.") }
+      item { Surface(color=MaterialTheme.colorScheme.secondaryContainer,shape=RoundedCornerShape(20.dp)) {
+       Column(Modifier.fillMaxWidth().padding(22.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Text("Guardado en ahorro",style=MaterialTheme.typography.titleMedium)
+        Text(money(l.savingsBalance()),fontSize=32.sp,fontWeight=FontWeight.Bold)
+        Text("Al guardar dinero baja tu saldo actual; al retirarlo vuelve a subir. No cuenta como ingreso ni gasto.",style=MaterialTheme.typography.bodySmall)
+       }
+      } }
+      item { Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+       Button(onClick={dialog="deposit"},modifier=Modifier.weight(1f)) {Text("Guardar dinero")}
+       OutlinedButton(onClick={dialog="withdraw"},enabled=l.savingsBalance()>0,modifier=Modifier.weight(1f)) {Text("Retirar")}
+      } }
+      item { Text("Movimientos de ahorro",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold) }
+      if(l.savings.isEmpty()) item {Empty("Todavía no has guardado dinero. Registra tu primera aportación.")}
+      items(l.savings.sortedByDescending {it.date},key={it.id}) {entry->
+       Card {Row(Modifier.fillMaxWidth().padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {Text(if(entry.cents>0) "Dinero guardado" else "Retiro",fontWeight=FontWeight.Medium);Text(entry.date.toString(),style=MaterialTheme.typography.bodySmall)}
+        Text(money(kotlin.math.abs(entry.cents)),fontWeight=FontWeight.Bold)
+        IconButton(onClick={selectedSaving=entry;dialog="editSaving"}) {Icon(Icons.Default.Edit,"Editar movimiento de ahorro")}
        }}
       }
      }
@@ -189,8 +206,8 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
          debtSection(l,busy,if(moreSection=="Tarjetas") CreditType.CARD else CreditType.DEBT,
           onAdd={initialCreditType=if(moreSection=="Tarjetas") CreditType.CARD else CreditType.DEBT;creditAccount=null;dialog="account"},
           onEdit={creditAccount=it;dialog="account"},
-          onPay={creditAccount=it;debtPayment=null;dialog="payment"},
-          onEditPayment={p->creditAccount=l.accounts.first {it.id==p.accountId};debtPayment=p;dialog="payment"},
+          onPay={creditAccount=it;debtPayment=null;payingMovement=null;dialog="payment"},
+          onEditPayment={p->creditAccount=l.accounts.first {it.id==p.accountId};debtPayment=p;payingMovement=null;dialog="payment"},
           onDeletePayment={deletePayment=it},
           onArchive={vm.account(it.copy(archived=!it.archived))},
           onShowExpenses={accountFilter=it.id;tab=1},onAddMsi={creditAccount=it;dialog="msi"},onPayMsi={p,n->msiPlan=p;msiNumber=n;dialog="msiPay"},onDeleteMsi={deleteMsi=it},onEditMsi={msiPlan=it;dialog="msiEdit"})
@@ -225,16 +242,16 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
   if(dialog=="msiPay" && msiPlan!=null) InstallmentPaymentForm(msiPlan!!,msiNumber,l,{dialog=null}) {vm.installment(msiPlan!!,msiNumber,it);dialog=null}
   deleteMsi?.let {p->ConfirmDelete("¿Eliminar esta compra MSI?",if(p.historical) "Se eliminará el plan. Si estaba incluido en la deuda registrada, esa deuda se conservará." else "También se eliminará el gasto asociado a esta compra.",{deleteMsi=null}) {vm.deletePlan(p);deleteMsi=null}}
   if(dialog=="account") CreditAccountForm(creditAccount,{dialog=null},initialCreditType) {vm.account(it);dialog=null}
-  if(dialog=="payment" && creditAccount!=null) AmountForm(if(debtPayment==null) "Pagar a ${creditAccount!!.name}" else "Editar pago",debtPayment?.cents,"Reduce la deuda y tu saldo actual; no vuelve a contarse como gasto.",{dialog=null},max=(debtPayment?.planId?.let {id->l.planRemaining(l.plans.first {it.id==id})} ?: l.freeDebt(creditAccount!!.id))+(debtPayment?.cents ?: 0),maxLabel="Pendiente por pagar",initialDate=debtPayment?.date ?: LocalDate.now()) {c,d->vm.payment(debtPayment?.copy(cents=c,date=d) ?: DebtPayment(accountId=creditAccount!!.id,cents=c,date=d));dialog=null}
+  if((dialog=="payment" || dialog=="chargePayment") && creditAccount?.type==CreditType.CARD && debtPayment?.planId==null) CardPaymentForm(l,creditAccount!!,debtPayment,payingMovement,{dialog=null}) {vm.payment(it);dialog=null}
+  if(dialog=="payment" && creditAccount!=null && (creditAccount!!.type!=CreditType.CARD || debtPayment?.planId!=null)) AmountForm(if(debtPayment==null) "Pagar a ${creditAccount!!.name}" else "Editar pago",debtPayment?.cents,"Reduce la deuda y tu saldo actual; no vuelve a contarse como gasto.",{dialog=null},max=(debtPayment?.planId?.let {id->l.planRemaining(l.plans.first {it.id==id})} ?: l.freeDebt(creditAccount!!.id))+(debtPayment?.cents ?: 0),maxLabel="Pendiente por pagar",initialDate=debtPayment?.date ?: LocalDate.now()) {c,d->vm.payment(debtPayment?.copy(cents=c,date=d) ?: DebtPayment(accountId=creditAccount!!.id,cents=c,date=d));dialog=null}
   deletePayment?.let {p->ConfirmDelete("¿Eliminar este pago?","El importe volverá a tu saldo actual y aumentará la deuda pendiente.",{deletePayment=null}) {vm.delete(p);deletePayment=null}}
   if(dialog=="movement") MovementForm(l,movement,initialKind,{dialog=null}) {vm.movement(it);dialog=null}
   if(dialog=="schedule") ScheduleForm(l,schedule,newLoan,{dialog=null}) {vm.schedule(it);dialog=null}
   if(dialog=="confirm" && schedule!=null) AmountForm("Confirmar ${schedule!!.title}",schedule!!.cents,"Se registrará un movimiento real.",{dialog=null}) {c,d ->vm.confirm(schedule!!,c,d);dialog=null}
-  if(dialog=="editSaving" && selectedSaving!=null) {val old=selectedSaving!!;AmountForm(if(old.cents>0) "Editar aportación" else "Editar retiro",kotlin.math.abs(old.cents),"Corrige el importe o la fecha conservando la meta.",{dialog=null},max=if(old.cents<0) l.saved(old.goalId)-old.cents else null,initialDate=old.date) {c,d->vm.saving(old.copy(cents=if(old.cents<0) -c else c,date=d));dialog=null}}
-  if(dialog=="goal") GoalForm(goal,{dialog=null}) {vm.goal(it);dialog=null}
-  if((dialog=="deposit" || dialog=="withdraw") && goal!=null) {
+  if(dialog=="editSaving" && selectedSaving!=null) {val old=selectedSaving!!;AmountForm(if(old.cents>0) "Editar dinero guardado" else "Editar retiro",kotlin.math.abs(old.cents),"Corrige el importe o la fecha del ahorro.",{dialog=null},max=if(old.cents<0) l.savings.sumOf {it.cents}-old.cents else null,initialDate=old.date) {c,d->vm.saving(old.copy(cents=if(old.cents<0) -c else c,date=d));dialog=null}}
+  if(dialog=="deposit" || dialog=="withdraw") {
    val withdraw=dialog=="withdraw"
-   AmountForm(if(withdraw) "Retirar ahorro" else "Aportar a ${goal!!.name}",null,"No se contabiliza como gasto ni ingreso.",{dialog=null},max=if(withdraw) l.saved(goal!!.id) else null) {c,d ->vm.saving(Saving(goalId=goal!!.id,cents=if(withdraw)-c else c,date=d));dialog=null}
+   AmountForm(if(withdraw) "Retirar de ahorros" else "Guardar en ahorros",null,"Se mueve entre tu saldo actual y tus ahorros; no se cuenta como ingreso ni gasto.",{dialog=null},max=if(withdraw) l.savingsBalance() else null) {c,d ->vm.saving(Saving(goalId="",cents=if(withdraw)-c else c,date=d));dialog=null}
   }
   if(dialog=="category") CategoryForm(l,category,{dialog=null}) {vm.category(it);dialog=null}
   if(dialog=="password") {
@@ -256,16 +273,25 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
 }
 
 @Composable internal fun Heading(title:String,subtitle:String) {Column(verticalArrangement=Arrangement.spacedBy(5.dp)) {Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold);Text(subtitle,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}}
-@Composable private fun Stat(label:String,value:String,icon:ImageVector,modifier:Modifier) {Surface(modifier,shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surface) {Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Text(label,style=MaterialTheme.typography.bodySmall);Text(value,fontWeight=FontWeight.Bold,fontSize=18.sp)}}}
 @Composable private fun Empty(text:String,action:String?=null,onClick:()->Unit={}) {Column(Modifier.fillMaxWidth().padding(vertical=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {Text(text,color=MaterialTheme.colorScheme.onSurfaceVariant);if(action!=null) TextButton(onClick=onClick) {Text(action)}}}
 @Composable private fun MonthPicker(month:YearMonth,previous:()->Unit,next:()->Unit) {Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {IconButton(onClick=previous) {Icon(Icons.Default.ChevronLeft,"Mes anterior")};Text(monthName(month),Modifier.weight(1f),fontWeight=FontWeight.SemiBold);IconButton(onClick=next) {Icon(Icons.Default.ChevronRight,"Mes siguiente")}}}
-@Composable private fun MovementCard(m:Movement,l:Ledger,edit:()->Unit,delete:()->Unit) {
+@Composable private fun MovementCard(m:Movement,l:Ledger,edit:()->Unit,delete:()->Unit,pay:()->Unit) {
  val c=l.categories.firstOrNull {it.id==m.categoryId} ?: return
  val color=if(isSystemInDarkTheme()) {if(c.kind==Kind.EXPENSE) Color(0xFFFFB2B8) else Color(0xFF80D6BA)} else if(c.kind==Kind.EXPENSE) Expense else Income
- Surface(shape=RoundedCornerShape(14.dp)) {Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-  Icon(if(c.kind==Kind.EXPENSE) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,null,tint=color,modifier=Modifier.size(22.dp))
-  Column(Modifier.weight(1f).padding(horizontal=10.dp)) {Text(c.name,fontWeight=FontWeight.Medium);Text(l.movements.firstOrNull {it.id==m.id && it.date!=m.date}?.let {"Compra: ${it.date} · Mes del corte: ${YearMonth.from(m.date)}"} ?: m.date.toString(),style=MaterialTheme.typography.bodySmall);if(m.note.isNotBlank())Text(m.note,style=MaterialTheme.typography.bodySmall);m.accountId?.let {id->Text(l.accounts.first {it.id==id}.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)}}
-  Column(horizontalAlignment=Alignment.End) {Text("${if(c.kind==Kind.EXPENSE) "−" else "+"}${money(m.cents)}",fontWeight=FontWeight.Bold,color=color);Row {IconButton(onClick=edit,modifier=Modifier.size(48.dp)) {Icon(Icons.Default.Edit,"Editar movimiento",Modifier.size(18.dp))};IconButton(onClick=delete,modifier=Modifier.size(48.dp)) {Icon(Icons.Default.DeleteOutline,"Eliminar movimiento",Modifier.size(18.dp))}}}
+ val charge=l.movements.firstOrNull {it.id==m.id && it.accountId!=null && l.accounts.any {a->a.id==it.accountId && a.type==CreditType.CARD} && l.plans.none {p->p.movementId==it.id}}
+ Surface(shape=RoundedCornerShape(14.dp)) {Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+  Row(verticalAlignment=Alignment.CenterVertically) {
+   Icon(if(c.kind==Kind.EXPENSE) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,null,tint=color,modifier=Modifier.size(22.dp))
+   Column(Modifier.weight(1f).padding(horizontal=10.dp)) {Text(c.name,fontWeight=FontWeight.Medium);Text(l.movements.firstOrNull {it.id==m.id && it.date!=m.date}?.let {"Compra: ${it.date} · Mes del corte: ${YearMonth.from(m.date)}"} ?: m.date.toString(),style=MaterialTheme.typography.bodySmall);if(m.note.isNotBlank())Text(m.note,style=MaterialTheme.typography.bodySmall);m.accountId?.let {id->Text(l.accounts.first {it.id==id}.name,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)}}
+   Column(horizontalAlignment=Alignment.End) {Text("${if(c.kind==Kind.EXPENSE) "−" else "+"}${money(m.cents)}",fontWeight=FontWeight.Bold,color=color);Row {IconButton(onClick=edit,modifier=Modifier.size(48.dp)) {Icon(Icons.Default.Edit,"Editar movimiento",Modifier.size(18.dp))};IconButton(onClick=delete,enabled=l.payments.none {it.movementId==m.id},modifier=Modifier.size(48.dp)) {Icon(Icons.Default.DeleteOutline,"Eliminar movimiento",Modifier.size(18.dp))}}}
+  }
+  if(charge!=null) {
+   val remaining=l.unpaidCharge(charge.id)
+   val unassigned=l.payments.any {it.accountId==charge.accountId && it.planId==null && it.movementId==null}
+   Text(if(unassigned) "Abonos asignados: ${money(charge.cents-remaining)} de ${money(charge.cents)}" else "Pendiente de esta compra: ${money(remaining)}",style=MaterialTheme.typography.bodySmall)
+   if(unassigned) Text("Hay pagos generales sin asignar a compras.",style=MaterialTheme.typography.bodySmall)
+   if(remaining>0) OutlinedButton(onClick=pay,enabled=l.freeDebt(charge.accountId!!)>0 && charge.date<=LocalDate.now(),modifier=Modifier.fillMaxWidth()) {Text("Registrar pago de esta compra")}
+  }
  }}
 }
 @Composable private fun ScheduleCard(s:Schedule,l:Ledger,confirm:()->Unit,edit:()->Unit,delete:()->Unit) {Card {Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -324,13 +350,6 @@ private fun frequency(f:Frequency)=when(f){Frequency.WEEKLY->"Semanal";Frequency
   if(loan) {OutlinedTextField(remaining,{remaining=it.filter(Char::isDigit).take(3)},label={Text(if(s==null) "Número de cuotas" else "Cuotas restantes")},singleLine=true,modifier=Modifier.fillMaxWidth(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number));Text("Cada cuota se registra como gasto solo al confirmar. Tras la última, el préstamo sale de Programados.",style=MaterialTheme.typography.bodySmall)}
   Select("Frecuencia",Frequency.entries.map {it.name to frequency(it)},freq.name) {freq=Frequency.valueOf(it)}
   Text("Cada 15 días significa días transcurridos, no dos fechas fijas al mes.",style=MaterialTheme.typography.bodySmall)
- }
-}
-@Composable private fun GoalForm(g:Goal?,dismiss:()->Unit,save:(Goal)->Unit) {
- var name by remember {mutableStateOf(g?.name ?: "")};var amount by remember {mutableStateOf(g?.target?.let(::decimal) ?: "")};var day by remember {mutableStateOf(g?.deadline?.toString() ?: "")}
- val valid=runCatching {Rules.cents(amount);if(day.isNotBlank())date(day);require(name.isNotBlank() && name.length<=80)}.isSuccess
- FormDialog(if(g==null) "Nueva meta" else "Editar meta",dismiss,valid,onSave={save(Goal(g?.id ?: newId(),name.trim(),Rules.cents(amount),day.takeIf {it.isNotBlank()}?.let(::date)))}) {
-  Field(name,"Nombre",{name=it});Field(amount,"Objetivo (MXN)",{amount=it},true);DateField(day,"Fecha objetivo opcional",{day=it})
  }
 }
 @Composable internal fun AmountForm(title:String,initial:Long?,hint:String,dismiss:()->Unit,max:Long?=null,maxLabel:String="Disponible",initialDate:LocalDate=LocalDate.now(),save:(Long,LocalDate)->Unit) {
